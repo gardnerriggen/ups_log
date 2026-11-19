@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Shift Log</title>
+<meta name="theme-color" content="#6d4aff">
+<link rel="manifest" href='data:application/manifest+json,{"name":"Shift Log","short_name":"Shift Log","start_url":".","display":"standalone","background_color":"%23f5f2fa","theme_color":"%236d4aff","icons":[{"src":"data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 512 512%27%3E%3Crect width=%27512%27 height=%27512%27 rx=%27100%27 fill=%27%236d4aff%27/%3E%3Ctext x=%27256%27 y=%27360%27 font-size=%27280%27 text-anchor=%27middle%27 fill=%27white%27 font-family=%27sans-serif%27%3E%E2%8F%B1%3C/text%3E%3C/svg%3E","sizes":"any","type":"image/svg+xml","purpose":"any"}]}'>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 12px; padding-bottom: 70px; background: #f5f2fa; color: #1a1a1a; }
+  h1 { font-size: 1.15rem; margin: 8px 0 2px; }
+  .sub { font-size: 0.8rem; color: #666; margin: 0 0 12px; }
+  .card { background: #fff; border-radius: 10px; padding: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); margin-bottom: 10px; }
+  label { display: block; font-size: 0.78rem; color: #444; margin: 8px 0 2px; }
+  input, select { width: 100%; box-sizing: border-box; padding: 9px; font-size: 1rem; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
+  .row2 { display: flex; gap: 8px; }
+  .row2 > div { flex: 1; }
+  button { margin-top: 10px; padding: 11px; font-size: 0.95rem; border: none; border-radius: 8px; background: #6d4aff; color: #fff; cursor: pointer; }
+  button.full { width: 100%; }
+  button.sec { background: #ece7f8; color: #3b2f75; }
+  button.danger { background: #fcebe8; color: #a33; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th, td { padding: 6px 4px; text-align: right; border-bottom: 1px solid #eee; }
+  th:first-child, td:first-child { text-align: left; }
+  td button { margin: 0; padding: 3px 9px; font-size: 0.72rem; background: #ece7f8; color: #a33; }
+  .stat { display: inline-block; margin-right: 14px; }
+  .stat b { font-size: 1.05rem; display: block; }
+  .stat span { font-size: 0.72rem; color: #666; }
+  textarea { width: 100%; box-sizing: border-box; height: 110px; margin-top: 8px; font-family: monospace; font-size: 0.75rem; }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; font-size: 0.88rem; color: #3b2f75; padding: 4px 0; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  .tabs button { flex: 1; margin: 0; padding: 9px; background: #e6dff7; color: #3b2f75; }
+  .tabs button.on { background: #6d4aff; color: #fff; }
+  .diff-pos { color: #1a7f37; } .diff-neg { color: #c0392b; }
+  .msg { font-size: 0.78rem; color: #666; margin-top: 6px; }
+</style>
+</head>
+<body>
+<h1>Shift Log</h1>
+<p class="sub">All data stays on this device unless you export it.</p>
+
+<div class="tabs">
+  <button id="tabLog" class="on">Log shift</button>
+  <button id="tabPeriod">Pay period</button>
+  <button id="tabSettings">Settings</button>
+</div>
+
+<div id="viewLog">
+  <form id="entryForm" class="card">
+    <label for="date">Date</label>
+    <input type="date" id="date" required>
+    <div class="row2">
+      <div><label for="start">Start (17.5 = 5:30pm)</label><input type="number" id="start" step="0.01" min="0" max="24" required inputmode="decimal"></div>
+      <div><label for="end">End</label><input type="number" id="end" step="0.01" min="0" max="24" required inputmode="decimal"></div>
+    </div>
+    <div class="row2">
+      <div><label for="brk">Unpaid break (min)</label><input type="number" id="brk" step="1" min="0" value="0" inputmode="numeric"></div>
+      <div><label for="stops">Stops (optional)</label><input type="number" id="stops" step="1" min="0" inputmode="numeric"></div>
+    </div>
+    <div class="row2">
+      <div><label for="odoStart">Odometer start</label><input type="number" id="odoStart" step="0.1" min="0" required inputmode="decimal"></div>
+      <div><label for="odoEnd">Odometer end</label><input type="number" id="odoEnd" step="0.1" min="0" required inputmode="decimal"></div>
+    </div>
+    <button type="submit" class="full">Save shift</button>
+  </form>
+  <div class="card" id="quickTotals"></div>
+  <div class="card">
+    <table><thead><tr><th>Date</th><th>Hrs</th><th>Mi</th><th>Pay</th><th></th></tr></thead>
+    <tbody id="logBody"></tbody></table>
+  </div>
+</div>
+
+<div id="viewPeriod" class="hiddenx" style="display:none">
+  <div class="card">
+    <label for="ppFrom">From</label><input type="date" id="ppFrom">
+    <label for="ppTo">To</label><input type="date" id="ppTo">
+    <button class="sec" id="ppBtn">Apply range</button>
+    <div id="periodStats" style="margin-top:10px"></div>
+  </div>
+  <div class="card">
+    <label for="ppOdoStart">Period odometer start (cross-check)</label><input type="number" id="ppOdoStart" step="0.1" inputmode="decimal">
+    <label for="ppOdoEnd">Period odometer end</label><input type="number" id="ppOdoEnd" step="0.1" inputmode="decimal">
+    <div id="ppOdoDiff" class="msg"></div>
+  </div>
+  <div class="card">
+    <label for="paidAmt">Amount UPS actually paid ($)</label><input type="number" id="paidAmt" step="0.01" inputmode="decimal">
+    <label for="paidLabel">Which pay period (free text, e.g. "Nov 24 - Dec 7")</label><input type="text" id="paidLabel">
+    <button id="savePaid" class="sec">Save paid amount</button>
+    <div id="paidStatus" class="msg"></div>
+  </div>
+  <div class="card">
+    <button class="full sec" id="exportCsv">Export CSV file (share to Proton Drive)</button>
+    <button class="full sec" id="exportJson">Backup data (JSON)</button>
+    <div class="msg">CSV opens the Android share sheet — choose Proton Drive or Save to Downloads. Backup JSON restores everything if you change phones.</div>
+    <textarea id="jsonArea" style="display:none" readonly></textarea>
+    <button class="full danger" id="importJsonBtn" style="display:none">Import backup from box above</button>
+  </div>
+</div>
+
+<div id="viewSettings" style="display:none">
+  <div class="card">
+    <label for="rateHr">Hourly rate ($/hr)</label><input type="number" id="rateHr" step="0.01" inputmode="decimal">
+    <label for="rateMi">Per-mile rate ($/mi)</label><input type="number" id="rateMi" step="0.01" inputmode="decimal">
+    <label for="otThreshold">Daily overtime threshold (hrs)</label><input type="number" id="otThreshold" step="0.5" inputmode="decimal">
+    <button class="full" id="saveRates">Save</button>
+  </div>
+</div>
+
+<script>
+(function() {
+  var SKEY='shl_shifts', RKEY='shl_rates', PKEY='shl_paid';
+  var shifts=JSON.parse(localStorage.getItem(SKEY)||'[]');
+  var rates=JSON.parse(localStorage.getItem(RKEY)||'{"hr":0,"mi":0,"ot":8}');
+  var paid=JSON.parse(localStorage.getItem(PKEY)||'{}');
+  var ppRange=null;
+
+  function save(){localStorage.setItem(SKEY,JSON.stringify(shifts));localStorage.setItem(RKEY,JSON.stringify(rates));localStorage.setItem(PKEY,JSON.stringify(paid));}
+  function f(n,d){return Number(n||0).toFixed(d===undefined?2:d);}
+  function t2(h){var hh=Math.floor(h)%24,mm=Math.round((h-Math.floor(h))*60);if(mm===60){hh=(hh+1)%24;mm=0;}return(hh<10?'0':'')+hh+':'+(mm<10?'0':'')+mm;}
+
+  function calc(s){
+    var raw=(s.end<=s.start?s.end+24:s.end)-s.start-s.brk/60; if(raw<0)raw=0;
+    var ot=Math.max(raw-rates.ot,0), st=raw-ot;
+    var mi=s.odoEnd-s.odoStart;
+    return {hours:raw,ot:ot,straight:st,miles:mi,hpay:(st+ot*1.5)*rates.hr,mpay:Math.max(mi,0)*rates.mi};
+  }
+
+  function showTab(id){
+    ['viewLog','viewPeriod','viewSettings'].forEach(function(v){document.getElementById(v).style.display=v===id?'block':'none';});
+    ['tabLog','tabPeriod','tabSettings'].forEach(function(t){document.getElementById(t).classList.toggle('on',document.getElementById(t).id===id.replace('view','tab'));});
+  }
+  document.getElementById('tabLog').onclick=function(){showTab('viewLog')};
+  document.getElementById('tabPeriod').onclick=function(){showTab('viewPeriod');renderPeriod();};
+  document.getElementById('tabSettings').onclick=function(){showTab('viewSettings');};
+
+  function renderTotals(){
+    var h=0,m=0,p=0;
+    shifts.forEach(function(s){var c=calc(s);h+=c.hours;m+=c.miles;p+=c.hpay+c.mpay;});
+    document.getElementById('quickTotals').innerHTML='<span class="stat"><b>'+shifts.length+'</b><span>shifts</span></span><span class="stat"><b>'+f(h)+'</b><span>hours</span></span><span class="stat"><b>'+f(m,1)+'</b><span>miles</span></span><span class="stat"><b>$'+f(p)+'</b><span>est. pay</span></span>';
+  }
+
+  function renderLog(){
+    var b=document.getElementById('logBody'); b.innerHTML='';
+    shifts.slice().sort(function(a,c){return a.date<c.date?1:-1;}).forEach(function(s,i){
+      var c=calc(s), tr=document.createElement('tr');
+      tr.innerHTML='<td>'+s.date+'</td><td>'+f(c.hours)+'</td><td>'+f(c.miles,1)+'</td><td>$'+f(c.hpay+c.mpay)+'</td><td><button data-i="'+i+'">x</button></td>';
+      b.appendChild(tr);
+    });
+    b.querySelectorAll('button').forEach(function(btn){btn.onclick=function(){shifts.splice(parseInt(btn.dataset.i,10),1);save();renderLog();renderTotals();};});
+    renderTotals();
+  }
+
+  document.getElementById('entryForm').addEventListener('submit',function(e){
+    e.preventDefault();
+    shifts.push({date:document.getElementById('date').value,start:+document.getElementById('start').value,end:+document.getElementById('end').value,brk:+document.getElementById('brk').value||0,stops:+document.getElementById('stops').value||0,odoStart:+document.getElementById('odoStart').value,odoEnd:+document.getElementById('odoEnd').value});
+    save();renderLog();this.reset();document.getElementById('date').value=new Date().toISOString().slice(0,10);
+  });
+
+  function renderPeriod(){
+    if(ppRange){
+      var inR=shifts.filter(function(s){return s.date>=ppRange.from&&s.date<=ppRange.to;});
+      var h=0,m=0,p=0,ot=0;
+      inR.forEach(function(s){var c=calc(s);h+=c.hours;m+=c.miles;p+=c.hpay+c.mpay;ot+=c.ot;});
+      document.getElementById('periodStats').innerHTML='<span class="stat"><b>'+inR.length+'</b><span>shifts</span></span><span class="stat"><b>'+f(h)+'</b><span>hours (+'+f(ot)+' OT)</span></span><span class="stat"><b>'+f(m,1)+'</b><span>miles</span></span><span class="stat"><b>$'+f(p)+'</b><span>expected</span></span>';
+    } else { document.getElementById('periodStats').innerHTML='<span class="msg">Pick a range to see period totals.</span>'; }
+    var last=paid.ppLabels?paid.ppLabels.length:0;
+    if(paid.amount!==undefined&&paid.label){
+      var d=p.expected!==undefined?p.expected-paid.amount:null;
+      document.getElementById('paidStatus').innerHTML='Last saved: '+paid.label+' — paid $'+f(paid.amount)+(d===null?'':' <span class="'+(d>=0?'diff-pos':'diff-neg')+'">($'+f(Math.abs(d))+' '+(d>=0?'underpaid':'overpaid')+' vs logged)</span>');
+    } else if(ppRange){document.getElementById('paidStatus').textContent='Set expected range above, then enter the actual paid amount when your check lands.';}
+  }
+
+  document.getElementById('ppBtn').onclick=function(){
+    ppRange={from:document.getElementById('ppFrom').value,to:document.getElementById('ppTo').value};
+    var m=0,s=shifts.filter(function(x){return x.date>=ppRange.from&&x.date<=ppRange.to;});
+    m=s.length?s.reduce(function(a,c){return Math.min(a,c.odoStart);},Infinity):0;
+    var M=s.length?s.reduce(function(a,c){return Math.max(a,c.odoEnd);},0):0;
+    document.getElementById('ppOdoStart').value=m||'';document.getElementById('ppOdoEnd').value=M||'';
+    renderPeriod();
+  };
+
+  function crossCheck(){
+    var a=parseFloat(document.getElementById('ppOdoStart').value),b=parseFloat(document.getElementById('ppOdoEnd').value);
+    var sum=0;shifts.forEach(function(s){sum+=calc(s).miles;});
+    if(!isNaN(a)&&!isNaN(b)){var d=(b-a)-sum;document.getElementById('ppOdoDiff').innerHTML='Odometer delta: '+f(b-a,1)+' mi vs summed shifts: '+f(sum,1)+' mi — difference: '+f(d,1)+' mi'+(Math.abs(d)>1?' <b>(check for missed shifts)</b>':' ✓');}
+  }
+  document.getElementById('ppOdoEnd').addEventListener('input',crossCheck);
+  document.getElementById('ppOdoStart').addEventListener('input',crossCheck);
+
+  document.getElementById('savePaid').onclick=function(){
+    paid.amount=parseFloat(document.getElementById('paidAmt').value)||0;
+    paid.label=document.getElementById('paidLabel').value||'unlabeled';
+    var expected=null;
+    if(ppRange){var s=shifts.filter(function(x){return x.date>=ppRange.from&&x.date<=ppRange.to;});expected=s.reduce(function(a,c){return a+calc(c).hpay+calc(c).mpay;},0);}
+    paid.expected=expected;save();renderPeriod();
+  };
+
+  document.getElementById('exportCsv').onclick=function(){
+    var lines=['Date,Start,End,BreakMin,Stops,OdoStart,OdoEnd,Hours,Miles,HourlyPay,MileagePay,Total'];
+    shifts.slice().sort(function(a,b){return a.date<b.date?-1:1;}).forEach(function(s){var c=calc(s);lines.push([s.date,t2(s.start),t2(s.end),s.brk,s.stops||'',s.odoStart,s.odoEnd,f(c.hours),f(c.miles,1),f(c.hpay),f(c.mpay),f(c.hpay+c.mpay)].join(','));});
+    var blob=new Blob([lines.join('\n')],{type:'text/csv'});
+    var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='shift-log.csv';a.click();
+  };
+
+  document.getElementById('exportJson').onclick=function(){
+    var ta=document.getElementById('jsonArea');ta.style.display='block';
+    ta.value=JSON.stringify({shifts:shifts,rates:rates,paid:paid});
+    document.getElementById('importJsonBtn').style.display='block';
+    ta.select();
+    try{document.execCommand('copy');}catch(e){}
+  };
+
+  document.getElementById('importJsonBtn').onclick=function(){
+    try{
+      var d=JSON.parse(document.getElementById('jsonArea').value);
+      if(d.shifts){shifts=d.shifts;rates=d.rates||rates;paid=d.paid||{};save();renderLog();alert('Imported.');document.getElementById('jsonArea').style.display='none';this.style.display='none';}
+    }catch(e){alert('Could not parse backup.');}
+  };
+
+  document.getElementById('saveRates').onclick=function(){
+    rates.hr=+document.getElementById('rateHr').value||0;rates.mi=+document.getElementById('rateMi').value||0;rates.ot=+document.getElementById('otThreshold').value||8;
+    save();renderLog();
+  };
+
+  document.getElementById('rateHr').value=rates.hr||'';document.getElementById('rateMi').value=rates.mi||'';document.getElementById('otThreshold').value=rates.ot;
+  document.getElementById('date').valueAsDate=new Date();
+  renderLog();
+})();
+</script>
+</body>
+</html>

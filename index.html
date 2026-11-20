@@ -23,6 +23,10 @@
   th, td { padding: 6px 4px; text-align: right; border-bottom: 1px solid #eee; }
   th:first-child, td:first-child { text-align: left; }
   td button { margin: 0; padding: 3px 9px; font-size: 0.72rem; background: #ece7f8; color: #a33; }
+  tr.partial { background: #fff6dc; }
+  tr.partial td:first-child::after { content: " ✎"; color: #b98900; font-size: 0.75rem; }
+  .editing-banner { background: #fff6dc; border-radius: 8px; padding: 8px 10px; font-size: 0.85rem; margin-bottom: 8px; color: #7a5c00; display: none; }
+  .editing-banner.show { display: block; }
   .stat { display: inline-block; margin-right: 14px; }
   .stat b { font-size: 1.05rem; display: block; }
   .stat span { font-size: 0.72rem; color: #666; }
@@ -34,6 +38,15 @@
   .tabs button.on { background: #6d4aff; color: #fff; }
   .diff-pos { color: #1a7f37; } .diff-neg { color: #c0392b; }
   .msg { font-size: 0.78rem; color: #666; margin-top: 6px; }
+  dialog { border: none; border-radius: 12px; padding: 0; max-width: 320px; box-shadow: 0 4px 24px rgba(0,0,0,0.25); }
+  dialog::backdrop { background: rgba(0,0,0,0.4); }
+  .dlg-inner { padding: 16px; }
+  .dlg-inner p { margin: 0 0 4px; font-size: 0.95rem; }
+  .dlg-inner .dlgm { font-size: 0.78rem; color: #666; margin-bottom: 12px; }
+  .dlg-btns { display: flex; gap: 8px; }
+  .dlg-btns button { flex: 1; margin: 0; }
+  .dlg-btns .keep { background: #ece7f8; color: #3b2f75; }
+  .dlg-btns .del { background: #c0392b; color: #fff; }
 </style>
 </head>
 <body>
@@ -47,31 +60,35 @@
 </div>
 
 <div id="viewLog">
+  <div class="editing-banner" id="editBanner">✎ Editing an in-progress entry — fill in the rest and tap "Finish shift", or "Save in-progress" again to keep it partial.</div>
   <form id="entryForm" class="card">
     <label for="date">Date</label>
     <input type="date" id="date" required>
     <div class="row2">
-      <div><label for="start">Start (17.5 = 5:30pm)</label><input type="number" id="start" step="0.01" min="0" max="24" required inputmode="decimal"></div>
-      <div><label for="end">End</label><input type="number" id="end" step="0.01" min="0" max="24" required inputmode="decimal"></div>
+      <div><label for="start">Start (17.5 = 5:30pm)</label><input type="number" id="start" step="0.01" min="0" max="24" inputmode="decimal"></div>
+      <div><label for="end">End</label><input type="number" id="end" step="0.01" min="0" max="24" inputmode="decimal"></div>
     </div>
     <div class="row2">
-      <div><label for="brk">Unpaid break (min)</label><input type="number" id="brk" step="1" min="0" value="0" inputmode="numeric"></div>
+      <div><label for="brk">Unpaid break (min)</label><input type="number" id="brk" step="1" min="0" inputmode="numeric"></div>
       <div><label for="stops">Stops (optional)</label><input type="number" id="stops" step="1" min="0" inputmode="numeric"></div>
     </div>
     <div class="row2">
-      <div><label for="odoStart">Odometer start</label><input type="number" id="odoStart" step="0.1" min="0" required inputmode="decimal"></div>
-      <div><label for="odoEnd">Odometer end</label><input type="number" id="odoEnd" step="0.1" min="0" required inputmode="decimal"></div>
+      <div><label for="odoStart">Odometer start</label><input type="number" id="odoStart" step="0.1" min="0" inputmode="decimal"></div>
+      <div><label for="odoEnd">Odometer end</label><input type="number" id="odoEnd" step="0.1" min="0" inputmode="decimal"></div>
     </div>
-    <button type="submit" class="full">Save shift</button>
+    <button type="submit" class="full" id="finishBtn">Finish shift</button>
+    <button type="button" class="full sec" id="draftBtn">Save in-progress</button>
+    <button type="button" class="full danger" id="cancelEditBtn" style="display:none">Cancel editing (discard changes)</button>
   </form>
   <div class="card" id="quickTotals"></div>
   <div class="card">
+    <div class="msg" style="margin:0 0 6px">Tap a row to edit it. Yellow rows are in progress and not counted in totals.</div>
     <table><thead><tr><th>Date</th><th>Hrs</th><th>Mi</th><th>Pay</th><th></th></tr></thead>
     <tbody id="logBody"></tbody></table>
   </div>
 </div>
 
-<div id="viewPeriod" class="hiddenx" style="display:none">
+<div id="viewPeriod" style="display:none">
   <div class="card">
     <label for="ppFrom">From</label><input type="date" id="ppFrom">
     <label for="ppTo">To</label><input type="date" id="ppTo">
@@ -92,7 +109,7 @@
   <div class="card">
     <button class="full sec" id="exportCsv">Export CSV file (share to Proton Drive)</button>
     <button class="full sec" id="exportJson">Backup data (JSON)</button>
-    <div class="msg">CSV opens the Android share sheet — choose Proton Drive or Save to Downloads. Backup JSON restores everything if you change phones.</div>
+    <div class="msg">CSV opens the Android share sheet — choose Proton Drive or Save to Downloads. In-progress entries are excluded from CSV. Backup JSON restores everything if you change phones.</div>
     <textarea id="jsonArea" style="display:none" readonly></textarea>
     <button class="full danger" id="importJsonBtn" style="display:none">Import backup from box above</button>
   </div>
@@ -107,20 +124,33 @@
   </div>
 </div>
 
+<dialog id="delDialog">
+  <div class="dlg-inner">
+    <p id="delMsg">Delete this shift?</p>
+    <p class="dlgm">This can't be undone. Tip: back up your data regularly (Pay period tab).</p>
+    <div class="dlg-btns">
+      <button type="button" class="keep" id="delCancel">Keep</button>
+      <button type="button" class="del" id="delConfirm">Delete</button>
+    </div>
+  </div>
+</dialog>
+
 <script>
 (function() {
   var SKEY='shl_shifts', RKEY='shl_rates', PKEY='shl_paid';
   var shifts=JSON.parse(localStorage.getItem(SKEY)||'[]');
   var rates=JSON.parse(localStorage.getItem(RKEY)||'{"hr":0,"mi":0,"ot":8}');
   var paid=JSON.parse(localStorage.getItem(PKEY)||'{}');
-  var ppRange=null;
+  var ppRange=null, editIdx=null, pendingDel=null;
 
   function save(){localStorage.setItem(SKEY,JSON.stringify(shifts));localStorage.setItem(RKEY,JSON.stringify(rates));localStorage.setItem(PKEY,JSON.stringify(paid));}
   function f(n,d){return Number(n||0).toFixed(d===undefined?2:d);}
   function t2(h){var hh=Math.floor(h)%24,mm=Math.round((h-Math.floor(h))*60);if(mm===60){hh=(hh+1)%24;mm=0;}return(hh<10?'0':'')+hh+':'+(mm<10?'0':'')+mm;}
 
+  function isComplete(s){return s.start!=null&&!isNaN(s.start)&&s.end!=null&&!isNaN(s.end)&&s.odoStart!=null&&!isNaN(s.odoStart)&&s.odoEnd!=null&&!isNaN(s.odoEnd);}
+
   function calc(s){
-    var raw=(s.end<=s.start?s.end+24:s.end)-s.start-s.brk/60; if(raw<0)raw=0;
+    var raw=(s.end<=s.start?s.end+24:s.end)-s.start-(s.brk||0)/60; if(raw<0)raw=0;
     var ot=Math.max(raw-rates.ot,0), st=raw-ot;
     var mi=s.odoEnd-s.odoStart;
     return {hours:raw,ot:ot,straight:st,miles:mi,hpay:(st+ot*1.5)*rates.hr,mpay:Math.max(mi,0)*rates.mi};
@@ -128,53 +158,125 @@
 
   function showTab(id){
     ['viewLog','viewPeriod','viewSettings'].forEach(function(v){document.getElementById(v).style.display=v===id?'block':'none';});
-    ['tabLog','tabPeriod','tabSettings'].forEach(function(t){document.getElementById(t).classList.toggle('on',document.getElementById(t).id===id.replace('view','tab'));});
+    ['tabLog','tabPeriod','tabSettings'].forEach(function(t){document.getElementById(t).classList.toggle('on',t===id.replace('view','tab'));});
+    if(id!=='viewLog') resetForm();
   }
   document.getElementById('tabLog').onclick=function(){showTab('viewLog')};
   document.getElementById('tabPeriod').onclick=function(){showTab('viewPeriod');renderPeriod();};
   document.getElementById('tabSettings').onclick=function(){showTab('viewSettings');};
 
   function renderTotals(){
-    var h=0,m=0,p=0;
-    shifts.forEach(function(s){var c=calc(s);h+=c.hours;m+=c.miles;p+=c.hpay+c.mpay;});
-    document.getElementById('quickTotals').innerHTML='<span class="stat"><b>'+shifts.length+'</b><span>shifts</span></span><span class="stat"><b>'+f(h)+'</b><span>hours</span></span><span class="stat"><b>'+f(m,1)+'</b><span>miles</span></span><span class="stat"><b>$'+f(p)+'</b><span>est. pay</span></span>';
+    var h=0,m=0,p=0,n=0;
+    shifts.forEach(function(s){if(isComplete(s)){var c=calc(s);h+=c.hours;m+=c.miles;p+=c.hpay+c.mpay;n++;}});
+    var pend=shifts.length-n;
+    document.getElementById('quickTotals').innerHTML='<span class="stat"><b>'+n+'</b><span>shifts</span></span><span class="stat"><b>'+f(h)+'</b><span>hours</span></span><span class="stat"><b>'+f(m,1)+'</b><span>miles</span></span><span class="stat"><b>$'+f(p)+'</b><span>est. pay</span></span>'+(pend?'<div class="msg">'+pend+' in-progress shift(s) not counted — tap them in the list to finish.</div>':'');
   }
 
   function renderLog(){
     var b=document.getElementById('logBody'); b.innerHTML='';
     shifts.slice().sort(function(a,c){return a.date<c.date?1:-1;}).forEach(function(s,i){
-      var c=calc(s), tr=document.createElement('tr');
-      tr.innerHTML='<td>'+s.date+'</td><td>'+f(c.hours)+'</td><td>'+f(c.miles,1)+'</td><td>$'+f(c.hpay+c.mpay)+'</td><td><button data-i="'+i+'">x</button></td>';
+      var done=isComplete(s), tr=document.createElement('tr');
+      if(!done) tr.className='partial';
+      var c=done?calc(s):null;
+      tr.innerHTML='<td>'+s.date+'</td><td>'+(done?f(c.hours):'—')+'</td><td>'+(done?f(c.miles,1):'—')+'</td><td>'+(done?'$'+f(c.hpay+c.mpay):'—')+'</td><td><button data-i="'+i+'" aria-label="Delete">×</button></td>';
+      tr.addEventListener('click',function(ev){
+        if(ev.target.tagName==='BUTTON')return;
+        loadEntry(i);
+      });
       b.appendChild(tr);
     });
-    b.querySelectorAll('button').forEach(function(btn){btn.onclick=function(){shifts.splice(parseInt(btn.dataset.i,10),1);save();renderLog();renderTotals();};});
+    b.querySelectorAll('button').forEach(function(btn){
+      btn.onclick=function(ev){
+        ev.stopPropagation();
+        askDelete(parseInt(btn.dataset.i,10));
+      };
+    });
     renderTotals();
   }
 
+  function askDelete(i){
+    pendingDel=i;
+    var s=shifts[i];
+    document.getElementById('delMsg').textContent='Delete shift on '+s.date+'?';
+    var dlg=document.getElementById('delDialog');
+    if(typeof dlg.showModal==='function'){dlg.showModal();}
+    else{
+      // Fallback for very old browsers
+      if(confirm('Delete shift on '+s.date+'? This cannot be undone.')){doDelete();}
+      pendingDel=null;
+    }
+  }
+
+  function doDelete(){
+    if(pendingDel===null)return;
+    shifts.splice(pendingDel,1);
+    pendingDel=null;
+    if(editIdx!==null)resetForm();
+    save();renderLog();
+  }
+
+  document.getElementById('delConfirm').onclick=function(){document.getElementById('delDialog').close();doDelete();};
+  document.getElementById('delCancel').onclick=function(){pendingDel=null;document.getElementById('delDialog').close();};
+
+  function loadEntry(i){
+    editIdx=i; var s=shifts[i];
+    ['date','start','end','brk','stops','odoStart','odoEnd'].forEach(function(k){document.getElementById(k).value=s[k]!==undefined&&s[k]!==null?s[k]:'';});
+    document.getElementById('editBanner').classList.add('show');
+    document.getElementById('cancelEditBtn').style.display='block';
+    document.getElementById('finishBtn').textContent='Finish shift';
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+
+  function readForm(){
+    var g=function(k){var v=document.getElementById(k).value;return v===''?null:(isNaN(parseFloat(v))?null:parseFloat(v));};
+    return {date:document.getElementById('date').value,start:g('start'),end:g('end'),brk:g('brk')||0,stops:g('stops')||0,odoStart:g('odoStart'),odoEnd:g('odoEnd')};
+  }
+
+  function resetForm(){
+    document.getElementById('entryForm').reset();
+    document.getElementById('date').valueAsDate=new Date();
+    editIdx=null;
+    document.getElementById('editBanner').classList.remove('show');
+    document.getElementById('cancelEditBtn').style.display='none';
+    document.getElementById('finishBtn').textContent='Finish shift';
+  }
+
+  document.getElementById('draftBtn').onclick=function(){
+    var s=readForm();
+    if(!s.date){alert('Enter at least a date.');return;}
+    if(editIdx!==null){shifts[editIdx]=s;}
+    else{shifts.push(s);}
+    save();resetForm();renderLog();
+  };
+
+  document.getElementById('cancelEditBtn').onclick=function(){resetForm();};
+
   document.getElementById('entryForm').addEventListener('submit',function(e){
     e.preventDefault();
-    shifts.push({date:document.getElementById('date').value,start:+document.getElementById('start').value,end:+document.getElementById('end').value,brk:+document.getElementById('brk').value||0,stops:+document.getElementById('stops').value||0,odoStart:+document.getElementById('odoStart').value,odoEnd:+document.getElementById('odoEnd').value});
-    save();renderLog();this.reset();document.getElementById('date').value=new Date().toISOString().slice(0,10);
+    var s=readForm();
+    if(!isComplete(s)){alert('Missing start, end or odometer values — use "Save in-progress" if you are not finished.');return;}
+    if(editIdx!==null){shifts[editIdx]=s;}
+    else{shifts.push(s);}
+    save();resetForm();renderLog();
   });
 
   function renderPeriod(){
     if(ppRange){
-      var inR=shifts.filter(function(s){return s.date>=ppRange.from&&s.date<=ppRange.to;});
+      var inR=shifts.filter(function(s){return s.date>=ppRange.from&&s.date<=ppRange.to&&isComplete(s);});
       var h=0,m=0,p=0,ot=0;
       inR.forEach(function(s){var c=calc(s);h+=c.hours;m+=c.miles;p+=c.hpay+c.mpay;ot+=c.ot;});
-      document.getElementById('periodStats').innerHTML='<span class="stat"><b>'+inR.length+'</b><span>shifts</span></span><span class="stat"><b>'+f(h)+'</b><span>hours (+'+f(ot)+' OT)</span></span><span class="stat"><b>'+f(m,1)+'</b><span>miles</span></span><span class="stat"><b>$'+f(p)+'</b><span>expected</span></span>';
+      var pend=shifts.filter(function(s){return s.date>=ppRange.from&&s.date<=ppRange.to&&!isComplete(s);}).length;
+      document.getElementById('periodStats').innerHTML='<span class="stat"><b>'+inR.length+'</b><span>shifts</span></span><span class="stat"><b>'+f(h)+'</b><span>hours (+'+f(ot)+' OT)</span></span><span class="stat"><b>'+f(m,1)+'</b><span>miles</span></span><span class="stat"><b>$'+f(p)+'</b><span>expected</span></span>'+(pend?'<div class="msg">'+pend+' in-progress shift(s) excluded.</div>':'');
     } else { document.getElementById('periodStats').innerHTML='<span class="msg">Pick a range to see period totals.</span>'; }
-    var last=paid.ppLabels?paid.ppLabels.length:0;
     if(paid.amount!==undefined&&paid.label){
-      var d=p.expected!==undefined?p.expected-paid.amount:null;
-      document.getElementById('paidStatus').innerHTML='Last saved: '+paid.label+' — paid $'+f(paid.amount)+(d===null?'':' <span class="'+(d>=0?'diff-pos':'diff-neg')+'">($'+f(Math.abs(d))+' '+(d>=0?'underpaid':'overpaid')+' vs logged)</span>');
+      document.getElementById('paidStatus').innerHTML='Last saved: '+paid.label+' — paid $'+f(paid.amount);
     } else if(ppRange){document.getElementById('paidStatus').textContent='Set expected range above, then enter the actual paid amount when your check lands.';}
   }
 
   document.getElementById('ppBtn').onclick=function(){
     ppRange={from:document.getElementById('ppFrom').value,to:document.getElementById('ppTo').value};
-    var m=0,s=shifts.filter(function(x){return x.date>=ppRange.from&&x.date<=ppRange.to;});
-    m=s.length?s.reduce(function(a,c){return Math.min(a,c.odoStart);},Infinity):0;
+    var s=shifts.filter(function(x){return x.date>=ppRange.from&&x.date<=ppRange.to&&isComplete(x);});
+    var m=s.length?s.reduce(function(a,c){return Math.min(a,c.odoStart);},Infinity):0;
     var M=s.length?s.reduce(function(a,c){return Math.max(a,c.odoEnd);},0):0;
     document.getElementById('ppOdoStart').value=m||'';document.getElementById('ppOdoEnd').value=M||'';
     renderPeriod();
@@ -182,7 +284,7 @@
 
   function crossCheck(){
     var a=parseFloat(document.getElementById('ppOdoStart').value),b=parseFloat(document.getElementById('ppOdoEnd').value);
-    var sum=0;shifts.forEach(function(s){sum+=calc(s).miles;});
+    var sum=0;shifts.forEach(function(s){if(isComplete(s))sum+=calc(s).miles;});
     if(!isNaN(a)&&!isNaN(b)){var d=(b-a)-sum;document.getElementById('ppOdoDiff').innerHTML='Odometer delta: '+f(b-a,1)+' mi vs summed shifts: '+f(sum,1)+' mi — difference: '+f(d,1)+' mi'+(Math.abs(d)>1?' <b>(check for missed shifts)</b>':' ✓');}
   }
   document.getElementById('ppOdoEnd').addEventListener('input',crossCheck);
@@ -191,14 +293,12 @@
   document.getElementById('savePaid').onclick=function(){
     paid.amount=parseFloat(document.getElementById('paidAmt').value)||0;
     paid.label=document.getElementById('paidLabel').value||'unlabeled';
-    var expected=null;
-    if(ppRange){var s=shifts.filter(function(x){return x.date>=ppRange.from&&x.date<=ppRange.to;});expected=s.reduce(function(a,c){return a+calc(c).hpay+calc(c).mpay;},0);}
-    paid.expected=expected;save();renderPeriod();
+    save();renderPeriod();
   };
 
   document.getElementById('exportCsv').onclick=function(){
     var lines=['Date,Start,End,BreakMin,Stops,OdoStart,OdoEnd,Hours,Miles,HourlyPay,MileagePay,Total'];
-    shifts.slice().sort(function(a,b){return a.date<b.date?-1:1;}).forEach(function(s){var c=calc(s);lines.push([s.date,t2(s.start),t2(s.end),s.brk,s.stops||'',s.odoStart,s.odoEnd,f(c.hours),f(c.miles,1),f(c.hpay),f(c.mpay),f(c.hpay+c.mpay)].join(','));});
+    shifts.slice().sort(function(a,b){return a.date<b.date?-1:1;}).forEach(function(s){if(!isComplete(s))return;var c=calc(s);lines.push([s.date,t2(s.start),t2(s.end),s.brk,s.stops||'',s.odoStart,s.odoEnd,f(c.hours),f(c.miles,1),f(c.hpay),f(c.mpay),f(c.hpay+c.mpay)].join(','));});
     var blob=new Blob([lines.join('\n')],{type:'text/csv'});
     var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='shift-log.csv';a.click();
   };

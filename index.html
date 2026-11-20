@@ -10,6 +10,7 @@
   body { font-family: sans-serif; margin: 0; padding: 12px; padding-bottom: 70px; background: #f5f2fa; color: #1a1a1a; }
   h1 { font-size: 1.15rem; margin: 8px 0 2px; }
   .sub { font-size: 0.8rem; color: #666; margin: 0 0 12px; }
+  .ver { font-size: 0.7rem; background: #ece7f8; color: #3b2f75; border-radius: 4px; padding: 1px 6px; vertical-align: middle; }
   .card { background: #fff; border-radius: 10px; padding: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); margin-bottom: 10px; }
   label { display: block; font-size: 0.78rem; color: #444; margin: 8px 0 2px; }
   input, select { width: 100%; box-sizing: border-box; padding: 9px; font-size: 1rem; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
@@ -25,6 +26,7 @@
   td button { margin: 0; padding: 3px 9px; font-size: 0.72rem; background: #ece7f8; color: #a33; }
   tr.partial { background: #fff6dc; }
   tr.partial td:first-child::after { content: " ✎"; color: #b98900; font-size: 0.75rem; }
+  tr.sel { outline: 2px solid #6d4aff; outline-offset: -2px; }
   .editing-banner { background: #fff6dc; border-radius: 8px; padding: 8px 10px; font-size: 0.85rem; margin-bottom: 8px; color: #7a5c00; display: none; }
   .editing-banner.show { display: block; }
   .stat { display: inline-block; margin-right: 14px; }
@@ -50,7 +52,7 @@
 </style>
 </head>
 <body>
-<h1>Shift Log</h1>
+<h1>Shift Log <span class="ver">v6</span></h1>
 <p class="sub">All data stays on this device unless you export it.</p>
 
 <div class="tabs">
@@ -60,7 +62,7 @@
 </div>
 
 <div id="viewLog">
-  <div class="editing-banner" id="editBanner">✎ Editing an in-progress entry — fill in the rest and tap "Finish shift", or "Save in-progress" again to keep it partial.</div>
+  <div class="editing-banner" id="editBanner"></div>
   <form id="entryForm" class="card">
     <label for="date">Date</label>
     <input type="date" id="date" required>
@@ -137,11 +139,22 @@
 
 <script>
 (function() {
+  var APP_VERSION='v6';
   var SKEY='shl_shifts', RKEY='shl_rates', PKEY='shl_paid';
   var shifts=JSON.parse(localStorage.getItem(SKEY)||'[]');
   var rates=JSON.parse(localStorage.getItem(RKEY)||'{"hr":0,"mi":0,"ot":8}');
   var paid=JSON.parse(localStorage.getItem(PKEY)||'{}');
-  var ppRange=null, editIdx=null, pendingDel=null;
+  var ppRange=null, editingId=null, pendingDel=null;
+
+  function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
+  shifts.forEach(function(s){if(!s.id)s.id=uid();});
+
+  function byId(id){
+    for(var i=0;i<shifts.length;i++){
+      if(String(shifts[i].id)===String(id))return shifts[i];
+    }
+    return null;
+  }
 
   function save(){localStorage.setItem(SKEY,JSON.stringify(shifts));localStorage.setItem(RKEY,JSON.stringify(rates));localStorage.setItem(PKEY,JSON.stringify(paid));}
   function f(n,d){return Number(n||0).toFixed(d===undefined?2:d);}
@@ -174,56 +187,71 @@
 
   function renderLog(){
     var b=document.getElementById('logBody'); b.innerHTML='';
-    shifts.slice().sort(function(a,c){return a.date<c.date?1:-1;}).forEach(function(s,i){
+    var sorted=shifts.slice().sort(function(a,c){
+      if(a.date<c.date)return 1;
+      if(a.date>c.date)return -1;
+      return String(a.id).localeCompare(String(c.id));
+    });
+    sorted.forEach(function(s){
       var done=isComplete(s), tr=document.createElement('tr');
       if(!done) tr.className='partial';
+      if(editingId!==null&&String(s.id)===String(editingId)) tr.className+=' sel';
       var c=done?calc(s):null;
-      tr.innerHTML='<td>'+s.date+'</td><td>'+(done?f(c.hours):'—')+'</td><td>'+(done?f(c.miles,1):'—')+'</td><td>'+(done?'$'+f(c.hpay+c.mpay):'—')+'</td><td><button data-i="'+i+'" aria-label="Delete">×</button></td>';
+      tr.innerHTML='<td>'+s.date+'</td><td>'+(done?f(c.hours):'—')+'</td><td>'+(done?f(c.miles,1):'—')+'</td><td>'+(done?'$'+f(c.hpay+c.mpay):'—')+'</td><td><button data-id="'+s.id+'" aria-label="Delete">×</button></td>';
       tr.addEventListener('click',function(ev){
         if(ev.target.tagName==='BUTTON')return;
-        loadEntry(i);
+        loadEntry(s.id);
       });
       b.appendChild(tr);
     });
     b.querySelectorAll('button').forEach(function(btn){
       btn.onclick=function(ev){
         ev.stopPropagation();
-        askDelete(parseInt(btn.dataset.i,10));
+        askDelete(btn.getAttribute('data-id'));
       };
     });
     renderTotals();
   }
 
-  function askDelete(i){
-    pendingDel=i;
-    var s=shifts[i];
+  function askDelete(id){
+    var s=byId(id); if(!s)return;
+    pendingDel=id;
     document.getElementById('delMsg').textContent='Delete shift on '+s.date+'?';
     var dlg=document.getElementById('delDialog');
     if(typeof dlg.showModal==='function'){dlg.showModal();}
     else{
-      // Fallback for very old browsers
-      if(confirm('Delete shift on '+s.date+'? This cannot be undone.')){doDelete();}
+      if(confirm('Delete shift on '+s.date+'? This cannot be undone.')){
+        shifts.splice(shifts.indexOf(s),1);
+        save();renderLog();
+      }
       pendingDel=null;
     }
   }
 
-  function doDelete(){
-    if(pendingDel===null)return;
-    shifts.splice(pendingDel,1);
-    pendingDel=null;
-    if(editIdx!==null)resetForm();
-    save();renderLog();
-  }
-
-  document.getElementById('delConfirm').onclick=function(){document.getElementById('delDialog').close();doDelete();};
+  document.getElementById('delConfirm').onclick=function(){
+    document.getElementById('delDialog').close();
+    if(pendingDel!==null){
+      var s=byId(pendingDel);
+      if(s){
+        shifts.splice(shifts.indexOf(s),1);
+        if(editingId!==null&&String(editingId)===String(pendingDel))resetForm();
+        save();renderLog();
+      }
+      pendingDel=null;
+    }
+  };
   document.getElementById('delCancel').onclick=function(){pendingDel=null;document.getElementById('delDialog').close();};
 
-  function loadEntry(i){
-    editIdx=i; var s=shifts[i];
-    ['date','start','end','brk','stops','odoStart','odoEnd'].forEach(function(k){document.getElementById(k).value=s[k]!==undefined&&s[k]!==null?s[k]:'';});
+  function loadEntry(id){
+    var s=byId(id); if(!s)return;
+    var fields={'date':s.date,'start':(s.start!=null?s.start:''),'end':(s.end!=null?s.end:''),'brk':(s.brk!=null?s.brk:''),'stops':(s.stops!=null?s.stops:''),'odoStart':(s.odoStart!=null?s.odoStart:''),'odoEnd':(s.odoEnd!=null?s.odoEnd:'')};
+    Object.keys(fields).forEach(function(k){document.getElementById(k).value=fields[k];});
+    editingId=s.id;
+    document.getElementById('editBanner').textContent='Editing shift on '+s.date+' — check that the values below match what you expect.';
     document.getElementById('editBanner').classList.add('show');
     document.getElementById('cancelEditBtn').style.display='block';
-    document.getElementById('finishBtn').textContent='Finish shift';
+    document.getElementById('finishBtn').textContent='Save changes';
+    renderLog();
     window.scrollTo({top:0,behavior:'smooth'});
   }
 
@@ -235,30 +263,31 @@
   function resetForm(){
     document.getElementById('entryForm').reset();
     document.getElementById('date').valueAsDate=new Date();
-    editIdx=null;
+    editingId=null;
     document.getElementById('editBanner').classList.remove('show');
     document.getElementById('cancelEditBtn').style.display='none';
     document.getElementById('finishBtn').textContent='Finish shift';
+    renderLog();
   }
 
-  document.getElementById('draftBtn').onclick=function(){
+  function commitEntry(requireComplete){
     var s=readForm();
-    if(!s.date){alert('Enter at least a date.');return;}
-    if(editIdx!==null){shifts[editIdx]=s;}
-    else{shifts.push(s);}
+    if(!s.date){alert('Enter at least a date.');return false;}
+    if(requireComplete&&!isComplete(s)){alert('Missing start, end or odometer values — use "Save in-progress" if you are not finished.');return false;}
+    if(editingId!==null){
+      var orig=byId(editingId);
+      if(orig){s.id=orig.id;shifts[shifts.indexOf(orig)]=s;}
+      else{s.id=uid();shifts.push(s);}
+    }else{
+      s.id=uid();shifts.push(s);
+    }
     save();resetForm();renderLog();
-  };
+    return true;
+  }
 
+  document.getElementById('draftBtn').onclick=function(){commitEntry(false);};
   document.getElementById('cancelEditBtn').onclick=function(){resetForm();};
-
-  document.getElementById('entryForm').addEventListener('submit',function(e){
-    e.preventDefault();
-    var s=readForm();
-    if(!isComplete(s)){alert('Missing start, end or odometer values — use "Save in-progress" if you are not finished.');return;}
-    if(editIdx!==null){shifts[editIdx]=s;}
-    else{shifts.push(s);}
-    save();resetForm();renderLog();
-  });
+  document.getElementById('entryForm').addEventListener('submit',function(e){e.preventDefault();commitEntry(true);});
 
   function renderPeriod(){
     if(ppRange){
@@ -305,7 +334,7 @@
 
   document.getElementById('exportJson').onclick=function(){
     var ta=document.getElementById('jsonArea');ta.style.display='block';
-    ta.value=JSON.stringify({shifts:shifts,rates:rates,paid:paid});
+    ta.value=JSON.stringify({version:APP_VERSION,shifts:shifts,rates:rates,paid:paid});
     document.getElementById('importJsonBtn').style.display='block';
     ta.select();
     try{document.execCommand('copy');}catch(e){}
@@ -314,7 +343,7 @@
   document.getElementById('importJsonBtn').onclick=function(){
     try{
       var d=JSON.parse(document.getElementById('jsonArea').value);
-      if(d.shifts){shifts=d.shifts;rates=d.rates||rates;paid=d.paid||{};save();renderLog();alert('Imported.');document.getElementById('jsonArea').style.display='none';this.style.display='none';}
+      if(d.shifts){shifts=d.shifts;shifts.forEach(function(s){if(!s.id)s.id=uid();});rates=d.rates||rates;paid=d.paid||{};save();renderLog();alert('Imported.');document.getElementById('jsonArea').style.display='none';this.style.display='none';}
     }catch(e){alert('Could not parse backup.');}
   };
 
